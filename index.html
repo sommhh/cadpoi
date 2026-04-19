@@ -69,7 +69,7 @@ button,select,input{outline:none}
 <button id="clear" class="px-2.5 py-1.5 text-[13px] rounded-lg bg-red-950/60 border border-red-900/70 text-red-300">全消し</button>
 <button id="deleteSelected" class="px-2.5 py-1.5 text-[13px] rounded-lg border border-slate-700 bg-slate-800/80">選択削除</button>
 <label class="hidden sm:flex items-center gap-1 text-[11px] text-slate-400 ml-1"><input type="checkbox" id="confirmDelete" checked class="accent-sky-500">確認</label>
-<button id="print" class="px-2.5 py-1.5 text-[13px] rounded-lg bg-slate-800/80 border border-slate-700">印刷</button>
+<button id="print" class="px-3 py-1.5 text-[13px] font-medium rounded-lg bg-slate-200 border border-slate-300 text-slate-900">印刷</button>
 <button id="share" class="px-3 py-1.5 text-[13px] font-medium rounded-lg bg-sky-600 border border-sky-500 text-white">保存</button>
 </div>
 <div class="w-full sm:w-auto sm:ml-2"><input type="file" id="file" accept="image/*,application/pdf" class="w-full text-[11px] text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200"></div>
@@ -88,9 +88,10 @@ const svg=document.getElementById('svg'),linesLayer=document.getElementById('lin
 let nodes=[],edges=[],mode='point',nextId=1,dragging=null,bending=null,panning=false,spacePan=false,scale=1,offsetX=0,offsetY=0,panStart={x:0,y:0},history=[],historyIndex=-1;
 let jointSize=8,labelSize=10,eraserSize=28,erasing=false,eraserPoints=[],eraserPoly=null,eraseStrokes=[],currentLineColor='#000000',currentLabelColor='#000000',deletedEdges=new Set(),eraserColor='#ffffff';
 const BG_COLOR='#ffffff';
+const edgeKey=(a,b)=>[a,b].sort((x,y)=>x-y).join('-');
 
 function serialize(){return{nodes:nodes.map(n=>({...n})),edges:edges.map(e=>({a:e.a.id,b:e.b.id,bends:[...e.bends],color:e.color})),eraseStrokes:JSON.parse(JSON.stringify(eraseStrokes)),deleted:[...deletedEdges]};}
-function save(){history=history.slice(0,historyIndex+1);history.push(serialize());historyIndex++;}
+function save(){const snap=serialize();if(historyIndex>=0&&JSON.stringify(history[historyIndex])===JSON.stringify(snap))return;history=history.slice(0,historyIndex+1);history.push(snap);historyIndex++;}
 function restore(s){nodes=s.nodes.map(n=>({...n}));const m=new Map(nodes.map(n=>[n.id,n]));edges=s.edges.map(e=>({a:m.get(e.a),b:m.get(e.b),bends:[...(e.bends||[])],color:e.color||'#000000'}));eraseStrokes=s.eraseStrokes||[];deletedEdges=new Set(s.deleted||[]);nextId=Math.max(0,...nodes.map(n=>n.id))+1;draw();redrawErase();}
 function undo(){if(historyIndex>0){historyIndex--;restore(history[historyIndex]);}}
 function redo(){if(historyIndex<history.length-1){historyIndex++;restore(history[historyIndex]);}}
@@ -108,8 +109,8 @@ document.getElementById('deleteSelected').onclick=()=>{
     if(!confirm(msg))return;
   }
   const selectedIds=new Set(selectedNodes.map(n=>n.id));
-  selectedEdges.forEach(e=>{if(e.a&&e.b)deletedEdges.add([e.a.id,e.b.id].sort().join('-'));});
-  edges.filter(e=>e.a&&e.b&&(selectedIds.has(e.a.id)||selectedIds.has(e.b.id))).forEach(e=>{deletedEdges.add([e.a.id,e.b.id].sort().join('-'));});
+  selectedEdges.forEach(e=>{if(e.a&&e.b)deletedEdges.add(edgeKey(e.a.id,e.b.id));});
+  edges.filter(e=>e.a&&e.b&&(selectedIds.has(e.a.id)||selectedIds.has(e.b.id))).forEach(e=>{deletedEdges.add(edgeKey(e.a.id,e.b.id));});
   nodes=nodes.filter(n=>!n.selected);
   edges=edges.filter(e=>e.a&&e.b&&!(selectedIds.has(e.a.id)||selectedIds.has(e.b.id)||e.selected));
   nodes.forEach(n=>n.selected=false);edges.forEach(e=>e.selected=false);
@@ -123,16 +124,16 @@ circuitSel.value='1';
 function setMode(m){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>{const a=b.dataset.mode===m;b.classList.toggle('bg-sky-600',a);b.classList.toggle('text-white',a);b.classList.toggle('border-sky-500',a);b.classList.toggle('bg-slate-800/80',!a);});}
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));setMode('point');
 
-function getP(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
+function getP(e){const ctm=svg.getScreenCTM();if(!ctm)return{x:0,y:0};const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(ctm.inverse());}
 function getM(e){const p=getP(e);return{x:(p.x-offsetX)/scale,y:(p.y-offsetY)/scale};}
 const snap=v=>Math.round(v/10)*10;
 function dist(p,v,w){const l2=(v.x-w.x)**2+(v.y-w.y)**2;if(l2===0)return Math.hypot(p.x-v.x,p.y-v.y);let t=((p.x-v.x)*(w.x-v.x)+(p.y-v.y)*(w.y-v.y))/l2;t=Math.max(0,Math.min(1,t));return Math.hypot(p.x-(v.x+t*(w.x-v.x)),p.y-(v.y+t*(w.y-v.y)));}
 
-function rebuild(){const old=[...edges];edges=[];const g={};nodes.forEach(n=>{const k=n.voltage+'-'+n.circuit;if(!g[k])g[k]={pts:[],jns:[],lbs:[]};if(n.type==='point')g[k].pts.push(n);else if(n.type==='junction')g[k].jns.push(n);else g[k].lbs.push(n);});Object.values(g).forEach(gr=>{const pts=gr.pts.sort((a,b)=>a.id-b.id),jns=gr.jns.sort((a,b)=>a.id-b.id),lbs=gr.lbs.sort((a,b)=>a.id-b.id);const addEdge=(a,b)=>{const key=[a.id,b.id].sort().join('-');if(!deletedEdges.has(key)){const oe=old.find(o=>(o.a.id===a.id&&o.b.id===b.id)||(o.a.id===b.id&&o.b.id===a.id));edges.push({a,b,bends:oe?[...oe.bends]:[],color:oe?.color||currentLineColor});}};if(pts.length>=1&&lbs.length>=1&&jns.length===0){lbs.forEach(lb=>{pts.forEach(p=>addEdge(p,lb));});return;}pts.forEach((p,i)=>{const j=jns[Math.floor(i/10)];if(j)addEdge(p,j);});for(let i=0;i<jns.length-1;i++)addEdge(jns[i],jns[i+1]);if(lbs.length&&jns.length){lbs.forEach(lb=>addEdge(lb,jns[0]));}});draw();}
+function rebuild(){const old=[...edges];edges=[];const g={};nodes.forEach(n=>{const k=n.voltage+'-'+n.circuit;if(!g[k])g[k]={pts:[],jns:[],lbs:[]};if(n.type==='point')g[k].pts.push(n);else if(n.type==='junction')g[k].jns.push(n);else g[k].lbs.push(n);});Object.values(g).forEach(gr=>{const pts=gr.pts.sort((a,b)=>a.x-b.x||a.y-b.y),jns=gr.jns.sort((a,b)=>a.x-b.x||a.y-b.y),lbs=gr.lbs.sort((a,b)=>a.x-b.x||a.y-b.y);const addEdge=(a,b)=>{const key=edgeKey(a.id,b.id);if(!deletedEdges.has(key)){const oe=old.find(o=>(o.a.id===a.id&&o.b.id===b.id)||(o.a.id===b.id&&o.b.id===a.id));edges.push({a,b,bends:oe?[...oe.bends]:[],color:oe?.color||currentLineColor});}};if(pts.length>=1&&lbs.length>=1&&jns.length===0){lbs.forEach(lb=>{pts.forEach(p=>addEdge(p,lb));});return;}pts.forEach((p,i)=>{const j=jns.length?jns[i%jns.length]:null;if(j)addEdge(p,j);});for(let i=0;i<jns.length-1;i++)addEdge(jns[i],jns[i+1]);if(lbs.length&&jns.length){lbs.forEach(lb=>addEdge(lb,jns[0]));}});draw();}
 
 function updateDeleteButton(){const b=document.getElementById('deleteSelected');const s=nodes.some(n=>n.selected)||edges.some(e=>e.selected);b.style.background=s?'#0284c7':'';b.style.color=s?'white':'';}
 
-function draw(){linesLayer.innerHTML='';nodesLayer.innerHTML='';updateDeleteButton();edges.forEach(ed=>{const pts=[ed.a,...ed.bends,ed.b];for(let i=0;i<pts.length-1;i++){const l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',pts[i].x);l.setAttribute('y1',pts[i].y);l.setAttribute('x2',pts[i+1].x);l.setAttribute('y2',pts[i+1].y);l.setAttribute('stroke',ed.selected?'#f97316':(ed.color||'#000000'));l.setAttribute('stroke-width',ed.selected?'4':'2.3');l.setAttribute('stroke-linecap','round');l.style.cursor='pointer';l.addEventListener('click',e=>{e.stopPropagation();ed.selected=!ed.selected;draw();});l.addEventListener('contextmenu',e=>{e.preventDefault();deletedEdges.add([ed.a.id,ed.b.id].sort().join('-'));edges=edges.filter(ee=>ee!==ed);rebuild();draw();save();});linesLayer.appendChild(l);}if(bending&&bending.edge===ed&&bending.temp){const last=ed.bends.length?ed.bends[ed.bends.length-1]:ed.a;const t=document.createElementNS('http://www.w3.org/2000/svg','line');t.setAttribute('x1',last.x);t.setAttribute('y1',last.y);t.setAttribute('x2',bending.temp.x);t.setAttribute('y2',bending.temp.y);t.setAttribute('stroke',ed.color||'#000');t.setAttribute('stroke-width','2');t.setAttribute('stroke-dasharray','4 4');t.setAttribute('opacity','0.7');linesLayer.appendChild(t);}});nodes.forEach(n=>{const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('transform','translate('+n.x+','+n.y+')');g.style.cursor=mode==='move'?'move':'pointer';if(n.selected)g.setAttribute('filter','url(#glow)');if(n.type==='point'){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r','3.5');c.setAttribute('fill','#ef4444');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3':'1.5');g.appendChild(c);}else if(n.type==='junction'){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',jointSize);c.setAttribute('fill','white');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3.5':'2');g.appendChild(c);for(let i=-1;i<=1;i++){const l=document.createElementNS('http://www.w3.org/2000/svg','line');const y=i*jointSize*0.34;l.setAttribute('x1',-jointSize*0.65);l.setAttribute('y1',y);l.setAttribute('x2',jointSize*0.65);l.setAttribute('y2',y);l.setAttribute('stroke','#0f172a');l.setAttribute('stroke-width','1.3');l.setAttribute('transform','rotate(-45)');g.appendChild(l);}}else{const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',labelSize+1);c.setAttribute('fill','white');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3':'1.8');g.appendChild(c);if(n.voltage==='200V'){const c2=document.createElementNS('http://www.w3.org/2000/svg','circle');c2.setAttribute('r',(labelSize+1)*0.6);c2.setAttribute('fill','none');c2.setAttribute('stroke',n.selected?'#f97316':'#000000');c2.setAttribute('stroke-width','1.5');g.appendChild(c2);}const t=document.createElementNS('http://www.w3.org/2000/svg','text');t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','central');t.setAttribute('font-size',Math.round(labelSize*0.95));t.setAttribute('font-weight','800');t.setAttribute('fill',n.color||'#000000');t.textContent=n.circuit;g.appendChild(t);}g.addEventListener('mousedown',e=>{e.stopPropagation();if(mode==='move')dragging=n;});g.addEventListener('click',e=>{e.stopPropagation();n.selected=!n.selected;draw();});g.addEventListener('contextmenu',e=>{e.preventDefault();const id=n.id;nodes=nodes.filter(nn=>nn.id!==id);edges.filter(ed=>ed.a.id===id||ed.b.id===id).forEach(ed=>{deletedEdges.add([ed.a.id,ed.b.id].sort().join('-'));});rebuild();draw();save();});nodesLayer.appendChild(g);});update();}
+function draw(){linesLayer.innerHTML='';nodesLayer.innerHTML='';updateDeleteButton();edges.forEach(ed=>{const pts=[ed.a,...ed.bends,ed.b];for(let i=0;i<pts.length-1;i++){const l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',pts[i].x);l.setAttribute('y1',pts[i].y);l.setAttribute('x2',pts[i+1].x);l.setAttribute('y2',pts[i+1].y);l.setAttribute('stroke',ed.selected?'#f97316':(ed.color||'#000000'));l.setAttribute('stroke-width',ed.selected?'4':'2.3');l.setAttribute('stroke-linecap','round');l.style.cursor='pointer';l.addEventListener('click',e=>{e.stopPropagation();ed.selected=!ed.selected;draw();});l.addEventListener('contextmenu',e=>{e.preventDefault();deletedEdges.add(edgeKey(ed.a.id,ed.b.id));edges=edges.filter(ee=>ee!==ed);rebuild();draw();save();});linesLayer.appendChild(l);}if(bending?.edge===ed&&bending.temp){const last=ed.bends.length?ed.bends[ed.bends.length-1]:ed.a;const t=document.createElementNS('http://www.w3.org/2000/svg','line');t.setAttribute('x1',last.x);t.setAttribute('y1',last.y);t.setAttribute('x2',bending.temp.x);t.setAttribute('y2',bending.temp.y);t.setAttribute('stroke',ed.color||'#000');t.setAttribute('stroke-width','2');t.setAttribute('stroke-dasharray','4 4');t.setAttribute('opacity','0.7');linesLayer.appendChild(t);}});nodes.forEach(n=>{const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('transform','translate('+n.x+','+n.y+')');g.style.cursor=mode==='move'?'move':'pointer';if(n.selected)g.setAttribute('filter','url(#glow)');if(n.type==='point'){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r','3.5');c.setAttribute('fill','#ef4444');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3':'1.5');g.appendChild(c);}else if(n.type==='junction'){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',jointSize);c.setAttribute('fill','white');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3.5':'2');g.appendChild(c);for(let i=-1;i<=1;i++){const l=document.createElementNS('http://www.w3.org/2000/svg','line');const y=i*jointSize*0.34;l.setAttribute('x1',-jointSize*0.65);l.setAttribute('y1',y);l.setAttribute('x2',jointSize*0.65);l.setAttribute('y2',y);l.setAttribute('stroke','#0f172a');l.setAttribute('stroke-width','1.3');l.setAttribute('transform','rotate(-45)');g.appendChild(l);}}else{const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',labelSize+1);c.setAttribute('fill','white');c.setAttribute('stroke',n.selected?'#f97316':'#0f172a');c.setAttribute('stroke-width',n.selected?'3':'1.8');g.appendChild(c);if(n.voltage==='200V'){const c2=document.createElementNS('http://www.w3.org/2000/svg','circle');c2.setAttribute('r',(labelSize+1)*0.6);c2.setAttribute('fill','none');c2.setAttribute('stroke',n.selected?'#f97316':'#000000');c2.setAttribute('stroke-width','1.5');g.appendChild(c2);}const t=document.createElementNS('http://www.w3.org/2000/svg','text');t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','central');t.setAttribute('font-size',Math.round(labelSize*0.95));t.setAttribute('font-weight','800');t.setAttribute('fill',n.color||'#000000');t.textContent=n.circuit;g.appendChild(t);}g.addEventListener('mousedown',e=>{e.stopPropagation();if(mode==='move')dragging=n;});g.addEventListener('click',e=>{e.stopPropagation();n.selected=!n.selected;draw();});g.addEventListener('contextmenu',e=>{e.preventDefault();const id=n.id;nodes=nodes.filter(nn=>nn.id!==id);edges.filter(ed=>ed.a.id===id||ed.b.id===id).forEach(ed=>{deletedEdges.add(edgeKey(ed.a.id,ed.b.id));});rebuild();draw();save();});nodesLayer.appendChild(g);});update();}
 function update(){const t='translate('+offsetX+','+offsetY+') scale('+scale+')';['bg','lines','nodes','eraseLayer'].forEach(id=>document.getElementById(id).setAttribute('transform',t));}
 function redrawErase(){eraseLayer.innerHTML='';eraseStrokes.forEach(s=>{const p=document.createElementNS('http://www.w3.org/2000/svg','polyline');p.setAttribute('points',s.pts.map(pt=>pt.x+','+pt.y).join(' '));p.setAttribute('fill','none');p.setAttribute('stroke',s.color||BG_COLOR);p.setAttribute('stroke-width',s.size);p.setAttribute('stroke-linecap','round');p.setAttribute('stroke-linejoin','round');eraseLayer.appendChild(p);});}
 
@@ -150,12 +151,162 @@ document.getElementById('eraserSize').oninput=e=>{eraserSize=+e.target.value;};
 document.getElementById('lineColor').onchange=e=>{currentLineColor=e.target.value;};
 document.getElementById('labelColor').onchange=e=>{currentLabelColor=e.target.value;};
 
-document.getElementById('print').onclick=async()=>{const pdf=await exportToPDF();window.open(pdf.output('bloburl'),'_blank');};
 
-async function exportToPDF(){const {jsPDF}=window.jspdf;const clone=svg.cloneNode(true);['bg','lines','nodes','eraseLayer'].forEach(id=>{const g=clone.querySelector('#'+id);if(g)g.removeAttribute('transform');});const bgRect=clone.querySelector('#bg rect');if(bgRect)bgRect.setAttribute('fill','white');let minX=0,minY=0,maxX=800,maxY=600;const bgImgs=bgLayer.querySelectorAll('image');if(bgImgs.length){bgImgs.forEach(img=>{const x=parseFloat(img.getAttribute('x')||0);const y=parseFloat(img.getAttribute('y')||0);const w=parseFloat(img.getAttribute('width')||0);const h=parseFloat(img.getAttribute('height')||0);minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x+w);maxY=Math.max(maxY,y+h);});}else{nodes.forEach(n=>{minX=Math.min(minX,n.x-20);minY=Math.min(minY,n.y-20);maxX=Math.max(maxX,n.x+20);maxY=Math.max(maxY,n.y+20);});edges.forEach(e=>{[e.a,...e.bends,e.b].forEach(p=>{minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y);});});}const pad=40;minX-=pad;minY-=pad;maxX+=pad;maxY+=pad;const w=maxX-minX,h=maxY-minY;clone.setAttribute('viewBox',minX+' '+minY+' '+w+' '+h);clone.setAttribute('width',w);clone.setAttribute('height',h);const svgData=new XMLSerializer().serializeToString(clone);const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgData);return new Promise(res=>{const img=new Image();img.onload=()=>{const pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'px',format:[w,h]});const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);pdf.addImage(c.toDataURL('image/png'),'PNG',0,0,w,h);res(pdf);};img.src=url;});}
+/* --- 修正: PDF生成ロジックの改善 (Tainted Canvas, URL長制限への対応) --- */
+async function exportToPDF(){
+    const {jsPDF}=window.jspdf;
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    
+    // バウンディングボックスの計算
+    const bgImgs=bgLayer.querySelectorAll('image');
+    if(bgImgs.length){
+        bgImgs.forEach(img=>{
+            const x=parseFloat(img.getAttribute('x')||0);
+            const y=parseFloat(img.getAttribute('y')||0);
+            const w=parseFloat(img.getAttribute('width')||0);
+            const h=parseFloat(img.getAttribute('height')||0);
+            minX=Math.min(minX,x);minY=Math.min(minY,y);
+            maxX=Math.max(maxX,x+w);maxY=Math.max(maxY,y+h);
+        });
+    }else{
+        nodes.forEach(n=>{
+            minX=Math.min(minX,n.x-20);minY=Math.min(minY,n.y-20);
+            maxX=Math.max(maxX,n.x+20);maxY=Math.max(maxY,n.y+20);
+        });
+        edges.forEach(e=>{
+            [e.a,...e.bends,e.b].forEach(p=>{
+                minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);
+                maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y);
+            });
+        });
+    }
+    
+    if(!isFinite(minX)){minX=0;minY=0;maxX=800;maxY=600;}
+    const pad=40;minX-=pad;minY-=pad;maxX+=pad;maxY+=pad;
+    const w=maxX-minX,h=maxY-minY;
 
-document.getElementById('share').onclick=async()=>{try{const pdf=await exportToPDF();pdf.save('kairo.pdf');}catch(e){alert('保存失敗');}};
+    // キャンバスを用意
+    const c=document.createElement('canvas');
+    c.width=w;c.height=h;
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='white';
+    ctx.fillRect(0,0,w,h);
 
+    // 1. 背景画像を直接Canvasへ描画 (Tainted対策)
+    if(bgImgs.length){
+        for(let i=0;i<bgImgs.length;i++){
+            const imgEl=bgImgs[i];
+            const href=imgEl.getAttribute('href');
+            const op=parseFloat(imgEl.getAttribute('opacity')||'1');
+            const x=parseFloat(imgEl.getAttribute('x')||0)-minX;
+            const y=parseFloat(imgEl.getAttribute('y')||0)-minY;
+            const iw=parseFloat(imgEl.getAttribute('width')||0);
+            const ih=parseFloat(imgEl.getAttribute('height')||0);
+            
+            await new Promise(res=>{
+                const img=new Image();
+                img.onload=()=>{
+                    ctx.globalAlpha=op;
+                    ctx.drawImage(img,x,y,iw,ih);
+                    ctx.globalAlpha=1.0;
+                    res();
+                };
+                img.onerror=res; // エラーでも次へ進める
+                img.src=href;
+            });
+        }
+    }
+
+    // 2. SVGクローンから不要なものを消してBlobURLにする (URL長制限対策)
+    const clone=svg.cloneNode(true);
+    ['bg','lines','nodes','eraseLayer'].forEach(id=>{
+        const g=clone.querySelector('#'+id);
+        if(g)g.removeAttribute('transform');
+    });
+    
+    // 背景画像はCanvasに描画済みなのでSVGクローンからは削除
+    const cloneBgImgs=clone.querySelectorAll('#bg image');
+    cloneBgImgs.forEach(img=>img.remove());
+    
+    const bgRect=clone.querySelector('#bg rect');
+    if(bgRect)bgRect.setAttribute('fill','none');
+
+    clone.setAttribute('viewBox',minX+' '+minY+' '+w+' '+h);
+    clone.setAttribute('width',w);
+    clone.setAttribute('height',h);
+
+    const svgData=new XMLSerializer().serializeToString(clone);
+    const svgBlob=new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(svgBlob);
+
+    // SVGをCanvasに重ねる
+    return new Promise((res,rej)=>{
+        const svgImg=new Image();
+        svgImg.onload=()=>{
+            ctx.drawImage(svgImg,0,0,w,h);
+            URL.revokeObjectURL(url);
+            try{
+                const pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'px',format:[w,h]});
+                // JPEGにすることで容量を抑え、パフォーマンスを改善
+                pdf.addImage(c.toDataURL('image/jpeg', 0.95),'JPEG',0,0,w,h);
+                res(pdf);
+            }catch(err){
+                rej(err);
+            }
+        };
+        svgImg.onerror=(e)=>{
+            URL.revokeObjectURL(url);
+            rej(new Error('SVGの描画に失敗しました'));
+        };
+        svgImg.src=url;
+    });
+}
+
+// --- 修正: 印刷ボタン (ポップアップブロック対策・処理中表示) ---
+document.getElementById('print').onclick=async()=>{
+    const btn = document.getElementById('print');
+    const originalText = btn.textContent;
+    
+    // 事前にタブを開くことでポップアップブロックを回避
+    const printWindow = window.open('about:blank', '_blank');
+    if(!printWindow){
+        alert('ポップアップがブロックされました。ブラウザの設定で許可してください。');
+        return;
+    }
+    
+    printWindow.document.write('<div style="font-family:sans-serif;padding:20px;">印刷データの準備中... しばらくお待ちください。</div>');
+    btn.textContent = '準備中...';
+    
+    try {
+        const pdf = await exportToPDF();
+        printWindow.location.href = pdf.output('bloburl');
+    } catch(e) {
+        console.error(e);
+        printWindow.close();
+        alert('印刷の準備に失敗しました: ' + e.message);
+    } finally {
+        btn.textContent = originalText;
+    }
+};
+
+// --- 修正: 保存ボタン (処理中表示) ---
+document.getElementById('share').onclick=async()=>{
+    const btn = document.getElementById('share');
+    const originalText = btn.textContent;
+    btn.textContent = '保存中...';
+    
+    try {
+        const pdf = await exportToPDF();
+        pdf.save('kairo_restore.pdf');
+    } catch(e) {
+        console.error(e);
+        alert('保存失敗: ' + e.message);
+    } finally {
+        btn.textContent = originalText;
+    }
+};
+
+// ファイル読み込み処理
 document.getElementById('file').addEventListener('change',async e=>{
   const f=e.target.files[0];if(!f)return;
   bgLayer.innerHTML='';
